@@ -1,242 +1,281 @@
-# Face Door Demo
+# 人臉辨識門禁 Demo
 
-A university final-project demo that uses **InsightFace** and **OpenCV** to perform real-time face recognition on a USB webcam.  
-The system identifies registered people and marks unknowns — a door relay controlled by Arduino will be added in a future phase.
-
----
-
-## Tech Stack
-
-| Component | Version / Notes |
-|-----------|----------------|
-| Python | 3.10 |
-| OpenCV | `opencv-python` |
-| InsightFace | `buffalo_l` model (CPU) |
-| ONNX Runtime | CPU execution provider |
-| NumPy | vector math |
-| Pickle | local face database |
+大學期末專題：使用 **InsightFace** + **OpenCV** 進行即時人臉辨識，  
+透過藍牙將辨識結果傳送給 Arduino，控制伺服馬達模擬門鎖開關。
 
 ---
 
-## Environment Setup
+## 系統架構
 
-```bash
-# 1. (Recommended) create a virtual environment
+```
+攝影機 → Python 辨識 → 藍牙 (HC-06) → Arduino → 伺服馬達
+```
+
+---
+
+## 技術棧
+
+| 元件 | 說明 |
+|------|------|
+| Python 3.10 | 主程式語言 |
+| InsightFace `buffalo_l` | 人臉辨識模型 (CPU) |
+| OpenCV | 攝影機擷取 + 畫面顯示 |
+| pyserial | 藍牙序列埠通訊 |
+| Arduino Uno + HC-06 | 接收指令、控制伺服 |
+| SG90 伺服馬達 | 模擬門鎖動作 |
+
+---
+
+## 一、環境安裝
+
+### 方法 A：用 uv（推薦，快速）
+
+```powershell
+# 安裝 uv（若尚未安裝）
+pip install uv
+
+# 在專案目錄下同步依賴
+cd face_door_demo
+uv sync
+```
+
+### 方法 B：用 pip + venv
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate        # Windows
+.venv\Scripts\Activate.ps1   # Windows PowerShell
 
-# 2. Install dependencies
 pip install -r requirements.txt
 ```
 
-> The first run will automatically download the `buffalo_l` model (~300 MB) from the InsightFace model hub.
+> 第一次執行會自動下載 `buffalo_l` 模型（約 300 MB），請確保網路暢通。
 
 ---
 
-## Folder Structure
+## 二、專案結構
 
 ```
 face_door_demo/
-├── known_faces/          # One sub-folder per person (NOT committed)
-│   ├── Leo/
-│   │   ├── 1.jpg
-│   │   └── 2.jpg
-│   └── <other_person>/
-├── face_db.pkl           # Generated face database (NOT committed)
-├── config.py             # All tunable parameters
-├── utils.py              # Shared helper functions
-├── register_faces.py     # Build face_db.pkl from known_faces/
-├── recognize_camera.py   # Real-time webcam recognition
-├── requirements.txt
-└── README.md
+├── known_faces/           ← 放人臉照片（不上傳 git）
+│   └── 你的名字/
+│       ├── 1.jpg
+│       └── 2.jpg
+├── face_db.pkl            ← 自動產生的人臉資料庫（不上傳 git）
+│
+├── config.py              ← 所有可調參數（COM 埠、門檻值等）
+├── utils.py               ← 共用函式
+├── register_faces.py      ← 步驟 1：建立人臉資料庫
+├── recognize_camera.py    ← 步驟 2：即時辨識 + 送門控指令
+├── find_bt_port.py        ← 工具：掃描藍牙 COM 埠
+│
+└── arduino/
+    ├── face_door/
+    │   └── face_door.ino  ← Arduino 主程式（伺服馬達控制）
+    ├── WIRING.md          ← 硬體接線圖
+    └── AT_Mode_HC05/      ← 藍牙模組設定工具
 ```
 
 ---
 
-## How to Add a New Person
+## 三、新增人員照片
 
-1. Create a sub-folder with the person's name inside `known_faces/`:
-   ```
-   known_faces/
-   └── Alice/
-       ├── 1.jpg
-       ├── 2.jpg
-       └── 3.jpg
-   ```
-2. Add **3–5 clear frontal face photos** (JPG / PNG).
-3. Re-run `register_faces.py` to rebuild the database.
+在 `known_faces/` 建立以**姓名命名**的資料夾，放入照片：
+
+```
+known_faces/
+├── Leo/
+│   ├── 正面.jpg
+│   ├── 左側.jpg
+│   └── 右側.jpg
+└── Alice/
+    ├── 1.jpg
+    └── 2.jpg
+```
+
+**照片要求：**
+- 每人至少 1 張，建議 3～5 張（不同角度、不同光線）
+- 畫面中只有一張臉（多張臉會自動取最大的）
+- 格式：JPG、PNG、BMP、WebP 均可
 
 ---
 
-## How to Register Faces
+## 四、步驟 1：建立人臉資料庫
 
-```bash
+```powershell
+uv run python register_faces.py
+# 或
 python register_faces.py
 ```
 
-Expected output:
+**正確輸出範例：**
+
 ```
 Loading InsightFace model …
 Model ready.
 
-[OK] Leo: 1.jpg
-[OK] Leo: 2.jpg
+[OK] Leo: 正面.jpg
+[OK] Leo: 左側.jpg
+[OK] Leo: 右側.jpg
 [OK] Alice: 1.jpg
-...
+[OK] Alice: 2.jpg
+
 Face database saved to face_db.pkl
 Total registered people: 2
   - Leo
   - Alice
 ```
 
+每次新增或刪除人員，都要重新執行此步驟。
+
 ---
 
-## How to Run Camera Recognition
+## 五、步驟 2：執行即時辨識
 
-```bash
+```powershell
+uv run python recognize_camera.py
+# 或
 python recognize_camera.py
 ```
 
-The webcam window will open.  
-Each detected face is surrounded by a bounding box and labelled with the matched name and cosine-similarity score:
+**啟動訊息範例：**
 
 ```
-Leo    similarity=0.721
-Alice  similarity=0.658
-unknown  similarity=0.312
+Loading InsightFace model …
+Model ready.
+Loaded 2 registered identities: ['Leo', 'Alice']
+
+[BT] 自動偵測藍牙 COM 埠…
+[BT] 找到藍牙埠: COM13
+[BT] Connected to COM13 @ 38400
+
+Camera open. Press  q  to quit.
 ```
 
-Press **`q`** to quit.
+**辨識中的 log：**
+
+```
+[DOOR] GRANTED → Leo (sim=0.651)  → sent OPEN    ← 認識的人，伺服開門
+[DOOR] DENIED  (best sim=0.312)   → sent DENY    ← 陌生人，保持關閉
+[BT RX] ACK:OPEN                                  ← Arduino 回應確認
+```
+
+按鍵盤 **`q`** 結束程式（會自動送 DENY 關門）。
 
 ---
 
-## How to Adjust the Threshold
+## 六、設定參數（config.py）
 
-Open `config.py` and change `THRESHOLD`:
+開啟 `config.py` 修改：
 
 ```python
-THRESHOLD = 0.40   # loose   — easier to match
-THRESHOLD = 0.45   # normal  (default)
-THRESHOLD = 0.50   # strict  — recommended for door access
+# ── 藍牙設定 ──────────────────────────────────────────
+SERIAL_PORT    = "AUTO"   # "AUTO" = 自動偵測（推薦）
+                          # 或填寫固定埠號，例如 "COM13"
+SERIAL_BAUD    = 38400    # HC-06 常見出廠值；若亂碼改試 9600
+SERIAL_ENABLED = True     # 改 False = 只跑辨識，不連 Arduino
+
+DOOR_COOLDOWN_SEC = 5.0   # 同一人 5 秒內只送一次 OPEN（防重送）
+
+# ── 辨識門檻 ──────────────────────────────────────────
+THRESHOLD = 0.45   # 0.40 寬鬆 | 0.45 正常 | 0.50 嚴格
+
+# ── 攝影機 ────────────────────────────────────────────
+CAMERA_ID  = 0     # 0 = 內建鏡頭，1 = 第一支外接 USB 攝影機
 ```
 
 ---
 
-## Future Arduino Integration
+## 七、找藍牙 COM 埠
 
-> **Status:** Arduino 程式碼已完成，詳見 `arduino/face_door/face_door.ino`  
-> **硬體接線指南：** [arduino/WIRING.md](arduino/WIRING.md)
+如果藍牙自動偵測失敗，執行：
 
-### Python 端整合
+```powershell
+uv run python find_bt_port.py
+```
 
-在 `recognize_camera.py` 加入藍牙序列埠通訊：
+輸出範例：
+
+```
+共找到 7 個 COM 埠：
+
+埠號       裝置描述                          HWID
+COM11    Arduino Uno (COM11)              USB VID:PID=2341:0043
+COM13    透過藍牙連結的標準序列 (COM13)     BTHENUM\...98D331...  ← 這個
+```
+
+找到後填入 `config.py`：
 
 ```python
-# 安裝依賴
-pip install pyserial
-
-# 在 Windows 裝置管理員查看藍牙 COM 埠號 (例如 COM5)
+SERIAL_PORT = "COM13"
 ```
 
-**程式碼修改 (在主迴圈前)：**
+---
 
-```python
-import serial
+## 八、Arduino 硬體
 
-# 開啟藍牙序列埠 (改成你的 COM 號)
-bt = serial.Serial("COM5", 9600, timeout=1)
-```
+詳細接線圖請看 **[arduino/WIRING.md](arduino/WIRING.md)**
 
-**在辨識迴圈中發送指令：**
-
-```python
-for face in faces:
-    emb = l2_normalize(face.normed_embedding)
-    name, sim = recognize_face(emb, face_db, config.THRESHOLD)
-    draw_result(frame, face.bbox, name, sim)
-    
-    # 門禁控制邏輯
-    if name != "unknown":
-        bt.write(b"OPEN\n")
-        print(f"[DOOR] Access GRANTED to {name}")
-    else:
-        bt.write(b"DENY\n")
-        print("[DOOR] Access DENIED")
-```
-
-**清理資源 (在程式結束前)：**
-
-```python
-bt.close()
-```
-
-### 硬體需求
-
-| 元件 | 規格 |
-|------|------|
-| Arduino Uno / Nano | 1 片 |
-| HC-05 或 HC-06 藍牙模組 | 1 個 (轉接板版本推薦) |
-| 5V 繼電器模組 | 1 個 |
-| 電磁鎖 / 電控鎖 | 12V 2A |
-| 獨立電源 | 12V 適配器 (驅動電磁鎖) |
-
-**快速接線 (轉接板版本)：**
+**快速接線摘要：**
 
 ```
-HC-05 藍牙模組:
+HC-06 藍牙模組（轉接板版）:
   VCC → Arduino 5V
   GND → Arduino GND
   TXD → Arduino D5
   RXD → Arduino D6
 
-繼電器模組:
-  VCC → Arduino 5V
-  GND → Arduino GND
-  IN  → Arduino D8
-
-電磁鎖:
-  通過繼電器接 12V 獨立電源
+SG90 伺服馬達:
+  紅線 → Arduino 5V
+  棕線 → Arduino GND
+  橘線 → Arduino D9（PWM）
 ```
 
-詳細接線圖與疑難排解請參閱 **[arduino/WIRING.md](arduino/WIRING.md)**。
+**Arduino 指令說明：**
+
+| Python 送出 | Arduino 動作 |
+|------------|------------|
+| `OPEN\n` | 伺服轉到 90°（開門），3 秒後自動回 0° |
+| `DENY\n` | 伺服維持或回到 0°（關門） |
 
 ---
 
-## 完整系統流程
+## 九、完整執行流程
 
 ```
-┌─────────────┐
-│  USB 攝影機  │
-└──────┬──────┘
-       │ 擷取影像
-       ▼
-┌─────────────────────┐
-│  Python 人臉辨識     │
-│  (recognize_camera)  │
-└──────┬──────────────┘
-       │ 辨識成功/失敗
-       ▼
-┌─────────────────────┐
-│  藍牙序列埠傳送      │
-│  OPEN / DENY        │
-└──────┬──────────────┘
-       │ 藍牙通訊
-       ▼
-┌─────────────────────┐
-│  Arduino 接收指令    │
-│  (face_door.ino)    │
-└──────┬──────────────┘
-       │ 觸發繼電器
-       ▼
-┌─────────────────────┐
-│  電磁鎖開啟 3 秒     │
-│  自動上鎖           │
-└─────────────────────┘
+1. 準備照片
+   known_faces/你的名字/1.jpg  2.jpg  3.jpg
+
+2. 建立資料庫
+   python register_faces.py
+
+3. 上傳 Arduino 程式
+   arduino/face_door/face_door.ino
+   （上傳前先拔 D5/D6 藍牙線）
+
+4. 設定 COM 埠（可跳過，預設 AUTO）
+   config.py → SERIAL_PORT = "AUTO"
+
+5. 啟動辨識
+   python recognize_camera.py
+
+6. 對著鏡頭 → 辨識到已註冊人員 → 伺服開門 3 秒
 ```
 
 ---
 
-## Privacy Notes
+## 十、常見問題
 
-- `known_faces/` and `face_db.pkl` are listed in `.gitignore` and will **not** be committed to version control.
-- Never hard-code personal images in source files.
+| 問題 | 原因 | 解法 |
+|------|------|------|
+| `BT OFFLINE` | 藍牙未配對或埠號錯 | 執行 `find_bt_port.py` 確認 |
+| Arduino 收到亂碼 | baud rate 不符 | 改 `SERIAL_BAUD = 9600` 或 `115200` |
+| 一直顯示 unknown | 門檻太高或照片太少 | 調低 `THRESHOLD` 或多加照片 |
+| 攝影機打不開 | 被其他程式佔用 | 關閉 Teams/Zoom，改 `CAMERA_ID = 1` |
+| 伺服抖動 | 供電不穩 | 用外部 5V 2A 電源，GND 共接 |
+
+---
+
+## 隱私說明
+
+- `known_faces/` 與 `face_db.pkl` 已加入 `.gitignore`，**不會上傳到 git**
+- 請勿將個人照片直接寫死在程式碼中
