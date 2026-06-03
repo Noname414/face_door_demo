@@ -1,0 +1,13 @@
+[project]
+name = "face-door-demo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "insightface>=1.0.1",
+    "numpy>=2.4.6",
+    "onnxruntime>=1.26.0",
+    "opencv-python>=4.13.0.92",
+    "pyserial>=3.5",
+]

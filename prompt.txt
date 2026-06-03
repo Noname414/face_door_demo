@@ -1,0 +1,227 @@
+Please help me build a Python project for a Face Recognition Door Access Demo.
+
+The current stage only focuses on face recognition:
+
+Camera → Computer → Face Recognition → Show identity / unknown
+
+Arduino and relay control will be added later. Do not implement Arduino control yet, but leave a clear TODO section for future serial communication.
+
+Project name:
+face_door_demo
+
+Tech stack:
+- Python 3.10
+- OpenCV
+- InsightFace
+- ONNX Runtime
+- NumPy
+- Pickle for local face database
+
+Use CPU inference first.
+
+Required packages:
+pip install insightface onnxruntime opencv-python numpy
+
+Please create the following project structure:
+
+face_door_demo/
+├── known_faces/
+│   ├── professor/
+│   │   ├── 1.jpg
+│   │   ├── 2.jpg
+│   │   └── 3.jpg
+│   ├── student_A/
+│   │   ├── 1.jpg
+│   │   ├── 2.jpg
+│   │   └── 3.jpg
+│   └── student_B/
+│       ├── 1.jpg
+│       ├── 2.jpg
+│       └── 3.jpg
+├── face_db.pkl
+├── config.py
+├── utils.py
+├── register_faces.py
+├── recognize_camera.py
+├── requirements.txt
+└── README.md
+
+Functional requirements:
+
+1. Face Registration
+
+Create register_faces.py.
+
+This script should:
+- Load all images from known_faces/
+- Treat each subfolder name as a person name
+- Use InsightFace buffalo_l model
+- Detect faces in each image
+- If multiple faces are detected, use the largest face
+- Extract normalized face embedding
+- Average all embeddings for the same person
+- Normalize the averaged embedding
+- Save the face database to face_db.pkl
+
+Expected command:
+python register_faces.py
+
+Expected output example:
+[OK] professor: 1.jpg
+[OK] professor: 2.jpg
+[OK] student_A: 1.jpg
+Face database saved to face_db.pkl
+Total registered people: 3
+
+2. Real-time Camera Recognition
+
+Create recognize_camera.py.
+
+This script should:
+- Open webcam using OpenCV
+- Load face_db.pkl
+- Use InsightFace buffalo_l model
+- Detect faces in real time
+- Extract face embedding
+- Compare current face embedding with registered embeddings using cosine similarity
+- If similarity is higher than threshold, show the person name
+- Otherwise show unknown
+- Draw bounding box and label on camera frame
+- Press q to exit
+
+Expected command:
+python recognize_camera.py
+
+Display example:
+professor 0.62
+student_A 0.58
+unknown 0.31
+
+3. Config Design
+
+Create config.py with the following values:
+
+MODEL_NAME = "buffalo_l"
+DB_PATH = "face_db.pkl"
+KNOWN_FACES_DIR = "known_faces"
+CAMERA_ID = 0
+DET_SIZE = (640, 640)
+FRAME_SIZE = (640, 480)
+THRESHOLD = 0.45
+PROVIDERS = ["CPUExecutionProvider"]
+
+The threshold should be adjustable:
+- 0.40 = loose
+- 0.45 = normal
+- 0.50 = strict
+
+For door access, stricter threshold is preferred later.
+
+4. Utility Functions
+
+Create utils.py.
+
+It should include reusable functions:
+- load_face_app()
+- l2_normalize(embedding)
+- get_largest_face(faces)
+- save_face_db(face_db, path)
+- load_face_db(path)
+- cosine_similarity(a, b)
+- recognize_face(face_embedding, face_db, threshold)
+
+Recognition logic:
+Use cosine similarity.
+
+Pseudo logic:
+similarity = dot(registered_embedding, current_embedding)
+
+if best_similarity >= threshold:
+    return person_name, best_similarity
+else:
+    return "unknown", best_similarity
+
+Because InsightFace already provides normed_embedding, cosine similarity can be calculated with dot product.
+
+5. Error Handling
+
+Please handle these cases:
+- Camera cannot be opened
+- face_db.pkl does not exist
+- No face detected in registration image
+- Multiple faces detected in registration image
+- Empty known_faces/ folder
+- Invalid image file
+- Person folder has no valid face image
+
+Show clear warning messages, but do not crash unless the database or camera is missing.
+
+6. README Requirements
+
+Create README.md.
+
+It should include:
+- Project description
+- Environment setup
+- Folder structure
+- How to add new people
+- How to register faces
+- How to run camera recognition
+- How to adjust threshold
+- Future Arduino integration plan
+
+7. Future Arduino Integration
+
+Do not implement Arduino yet, but leave a clear section in the code where it can be added later.
+
+Future logic:
+If recognized person is allowed:
+    send "OPEN\n" to Arduino through Serial
+Else:
+    do nothing or send "DENY\n"
+
+Future package:
+pip install pyserial
+
+Future code idea:
+import serial
+
+arduino = serial.Serial("COM3", 9600)
+
+if name != "unknown":
+    arduino.write(b"OPEN\n")
+
+8. Acceptance Criteria
+
+The project is successful when:
+- register_faces.py can generate face_db.pkl
+- recognize_camera.py can open webcam
+- Registered people are shown with their names
+- Unknown people are shown as unknown
+- Bounding boxes are displayed correctly
+- Threshold can be adjusted from config.py
+- Code is modular and easy to connect with Arduino later
+
+Please implement this project now.
+
+Generate all required files:
+- config.py
+- utils.py
+- register_faces.py
+- recognize_camera.py
+- requirements.txt
+- README.md
+
+Make the code clean, readable, and suitable for a university final project demo.
+My local environment:
+- OS: Windows 11
+- Python: 3.10
+- Camera: USB webcam
+- Camera ID: 0
+- Inference: CPU first
+- I already prepared known_faces/ folder.
+- Each subfolder under known_faces/ is a person name.
+- Each person folder contains 3 to 5 face images.
+- Please do not require GPU.
+- Please do not commit or hardcode personal face images.
+- Please add known_faces/ and face_db.pkl to .gitignore for privacy.
