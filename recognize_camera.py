@@ -70,8 +70,37 @@ def draw_result(
 _HC_OUI = {"98D331", "BCA080", "001131", "20C38F", "000000"}
 
 
+def _get_bt_friendly_names() -> dict[str, str]:
+    """從 Windows 登錄檔讀取已配對藍牙裝置名稱，回傳 {MAC大寫: name}。"""
+    import re
+    names: dict[str, str] = {}
+    try:
+        import winreg
+        key_path = r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as root:
+            i = 0
+            while True:
+                try:
+                    mac_hex = winreg.EnumKey(root, i)
+                    with winreg.OpenKey(root, mac_hex) as dev:
+                        try:
+                            name, _ = winreg.QueryValueEx(dev, "Name")
+                            if isinstance(name, (bytes, bytearray)):
+                                name = name.rstrip(b"\x00").decode("utf-8", errors="ignore")
+                            names[mac_hex.upper()] = name
+                        except FileNotFoundError:
+                            pass
+                    i += 1
+                except OSError:
+                    break
+    except Exception:
+        pass
+    return names
+
+
 def find_bt_port() -> str | None:
     """掃描所有 COM 埠，自動回傳最可能是 HC-05/HC-06 的埠號。"""
+    import re
     try:
         import serial.tools.list_ports
     except ImportError:
@@ -81,11 +110,29 @@ def find_bt_port() -> str | None:
         p for p in serial.tools.list_ports.comports()
         if "BTHENUM" in (p.hwid or "").upper()
     ]
-
     if not bt_ports:
         return None
 
-    # 優先比對已知 HC-05/HC-06 廠商 OUI
+    friendly = _get_bt_friendly_names()
+
+    def mac_from_hwid(hwid: str) -> str | None:
+        m = re.search(r"([0-9A-Fa-f]{12})_C", hwid)
+        if not m:
+            m = re.search(r"([0-9A-Fa-f]{12})", hwid)
+        return m.group(1).upper() if m else None
+
+    hint = getattr(config, "SERIAL_NAME_HINT", "").lower()
+
+    # 優先 1: 裝置名稱符合 SERIAL_NAME_HINT
+    if hint:
+        for p in bt_ports:
+            mac = mac_from_hwid(p.hwid or "")
+            name = friendly.get(mac, "").lower() if mac else ""
+            if hint in name:
+                print(f"[BT] 依名稱 '{config.SERIAL_NAME_HINT}' 找到: {p.device}")
+                return p.device
+
+    # 優先 2: 已知 HC-05/HC-06 廠商 OUI
     for p in bt_ports:
         hwid_clean = (p.hwid or "").upper().replace(":", "").replace("_", "").replace("-", "")
         for oui in _HC_OUI:

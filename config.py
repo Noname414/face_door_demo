@@ -35,10 +35,14 @@ PROVIDERS = ["CPUExecutionProvider"]
 #          「標準序列埠 (傳出)」, 例如 COM5
 # Linux/macOS: 例如 "/dev/rfcomm0" 或 "/dev/tty.HC05-DevB"
 # "AUTO" = 啟動時自動掃描藍牙 COM 埠 (推薦)
-# 或直接填寫埠號，例如 "COM13"
+# 或直接填寫埠號，例如 "COM9"
 SERIAL_PORT    = "AUTO"
 SERIAL_BAUD    = 38400  # HC-06 常見出廠值; 若亂碼改試 9600 / 115200
 SERIAL_ENABLED = True   # 設成 False 可關閉藍牙傳送 (純測試辨識)
+
+# 自動偵測時優先比對的藍牙裝置名稱關鍵字 (大小寫不分)
+# find_bt_port.py 顯示的「藍牙裝置名稱」欄包含此字串即優先選用
+SERIAL_NAME_HINT = "FaceDoor"
 
 # 同一個人連續被辨識時, 兩次送 OPEN 的最小間隔 (秒)
 # 避免每一幀都重送指令灌爆藍牙
