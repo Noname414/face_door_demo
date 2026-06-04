@@ -5,6 +5,18 @@
 #   python register_faces.py
 # ============================================================
 
+# ---- GPU: 必須在 import onnxruntime / insightface 之前先設 DLL 路徑 ----
+import os, sys as _sys
+_dll_dirs = []
+for _sp in list(_sys.path):
+    for _sub in ("nvidia\\cudnn\\bin", "nvidia\\cublas\\bin", "nvidia\\cuda_nvrtc\\bin"):
+        _d = os.path.join(_sp, _sub)
+        if os.path.isdir(_d):
+            _dll_dirs.append(_d)
+if _dll_dirs:
+    os.environ["PATH"] = os.pathsep.join(_dll_dirs) + os.pathsep + os.environ.get("PATH", "")
+# -----------------------------------------------------------------------
+
 import sys
 from pathlib import Path
 

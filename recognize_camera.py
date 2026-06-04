@@ -13,6 +13,18 @@
 #   3. 每一幀做臉部辨識:
 #        - 認識的人 → 送 "OPEN\n" 給 Arduino (有冷卻避免重送)
 #        - 陌生人  → 送 "DENY\n"
+
+# ---- GPU: 必須在 import onnxruntime / insightface 之前先設 DLL 路徑 ----
+import os, sys as _sys
+_dll_dirs = []
+for _sp in list(_sys.path):
+    for _sub in ("nvidia\\cudnn\\bin", "nvidia\\cublas\\bin", "nvidia\\cuda_nvrtc\\bin"):
+        _d = os.path.join(_sp, _sub)
+        if os.path.isdir(_d):
+            _dll_dirs.append(_d)
+if _dll_dirs:
+    os.environ["PATH"] = os.pathsep.join(_dll_dirs) + os.pathsep + os.environ.get("PATH", "")
+# -----------------------------------------------------------------------
 #   4. Arduino 端 (face_door.ino) 收到 OPEN 就轉動伺服馬達模擬開門
 # ============================================================
 
@@ -224,6 +236,18 @@ def main() -> None:
     last_sent_cmd: str | None = None
     last_sent_at: float = 0.0
 
+    # ---- FPS 計算 ------------------------------------------------
+    fps_counter = 0
+    fps_display = 0.0
+    fps_timer   = time.time()
+
+    # ---- 幀跳過：中間幀重用上次推論結果 --------------------------
+    frame_count    = 0
+    cached_faces   = []   # 上次推論的 face 物件
+    cached_results = []   # 上次推論的 (name, sim) 清單
+
+    infer_every = max(1, getattr(config, "INFER_EVERY_N_FRAMES", 3))
+
     # ---- Main loop -----------------------------------------------
     while True:
         ret, frame = cap.read()
@@ -231,20 +255,42 @@ def main() -> None:
             print("[WARN] Failed to grab frame, retrying …")
             continue
 
-        faces = app.get(frame)
+        frame_count += 1
 
-        # 這一幀「最有把握」的辨識結果 (用相似度最高那張臉決定要不要開門)
+        # 每 infer_every 幀才跑一次推論，其餘幀直接用快取
+        if frame_count % infer_every == 1 or infer_every == 1:
+            faces = app.get(frame)
+            cached_faces = faces
+            cached_results = []
+            for face in faces:
+                emb  = l2_normalize(face.normed_embedding)
+                name, sim = recognize_face(emb, face_db, config.THRESHOLD)
+                cached_results.append((name, sim))
+        else:
+            faces = cached_faces
+
+        # 這一幀「最有把握」的辨識結果
         frame_best_name = "unknown"
         frame_best_sim  = -1.0
 
-        for face in faces:
-            emb = l2_normalize(face.normed_embedding)
-            name, sim = recognize_face(emb, face_db, config.THRESHOLD)
+        for face, (name, sim) in zip(faces, cached_results):
             draw_result(frame, face.bbox, name, sim)
-
             if sim > frame_best_sim:
                 frame_best_sim  = sim
                 frame_best_name = name
+
+        # ---- FPS 顯示 --------------------------------------------
+        fps_counter += 1
+        now_t = time.time()
+        if now_t - fps_timer >= 1.0:
+            fps_display = fps_counter / (now_t - fps_timer)
+            fps_counter = 0
+            fps_timer   = now_t
+        cv2.putText(
+            frame,
+            f"FPS:{fps_display:.1f}  infer:1/{infer_every}",
+            (8, 22), FONT, 0.55, (0, 255, 255), 1, cv2.LINE_AA,
+        )
 
         # ---- Decide command + cooldown ---------------------------
         if faces:

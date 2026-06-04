@@ -25,8 +25,19 @@ FRAME_SIZE = (640, 480)
 # For door access a stricter value (0.50) is recommended.
 THRESHOLD = 0.45
 
-# ONNX execution providers (CPU only for now)
-PROVIDERS = ["CPUExecutionProvider"]
+# ONNX execution providers — 自動偵測 GPU，沒有則 fallback 到 CPU
+# 若要強制 CPU: PROVIDERS = ["CPUExecutionProvider"]
+# 若要強制 GPU: PROVIDERS = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+def _auto_providers():
+    try:
+        import onnxruntime as ort
+        if "CUDAExecutionProvider" in ort.get_available_providers():
+            return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    except Exception:
+        pass
+    return ["CPUExecutionProvider"]
+
+PROVIDERS = _auto_providers()
 
 # ------------------------------------------------------------------
 # Arduino / Bluetooth serial (for servo door control)
@@ -47,3 +58,7 @@ SERIAL_NAME_HINT = "FaceDoor"
 # 同一個人連續被辨識時, 兩次送 OPEN 的最小間隔 (秒)
 # 避免每一幀都重送指令灌爆藍牙
 DOOR_COOLDOWN_SEC = 5.0
+
+# 每隔幾幀才跑一次 InsightFace 推論 (1 = 每幀都跑，最準但最慢)
+# 建議值: 3~5 (大幅提升 FPS，辨識結果在中間幀持續顯示)
+INFER_EVERY_N_FRAMES = 3
