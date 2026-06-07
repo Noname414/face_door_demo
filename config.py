@@ -23,7 +23,7 @@ FRAME_SIZE = (640, 480)
 # Cosine-similarity threshold for identity matching
 # 0.40 = loose  | 0.45 = normal  | 0.50 = strict
 # For door access a stricter value (0.50) is recommended.
-THRESHOLD = 0.45
+THRESHOLD = 0.7
 
 # ONNX execution providers — 自動偵測 GPU，沒有則 fallback 到 CPU
 # 若要強制 CPU: PROVIDERS = ["CPUExecutionProvider"]

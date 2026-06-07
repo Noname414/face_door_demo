@@ -1,68 +1,60 @@
 // ============================================================
-// face_door.ino — Face Recognition Door Controller (Servo 版)
+// face_door.ino — Face Recognition Door Controller (Relay 版)
 // ============================================================
 //
 // ┌──────────────────────────────────────────────────────────┐
-// │  藍牙模組接線 (HC-05 / HC-06)                             │
+// │  藍牙模組接線 (HC-05 / HC-06)                              │
 // └──────────────────────────────────────────────────────────┘
-// ⚠️  HC-05/HC-06 是 3.3V 邏輯 — Arduino Uno 是 5V！
-//
-// 推薦接法 (轉接板版本):
 //   藍牙 VCC   →  Arduino 5V
 //   藍牙 GND   →  Arduino GND
 //   藍牙 TXD   →  Arduino D5      (SoftwareSerial RX)
-//   藍牙 RXD   →  Arduino D6      (SoftwareSerial TX，板載分壓可直連)
-//   藍牙 EN    →  不接
-//   藍牙 STATE →  不接 (或 Arduino D7)
+//   藍牙 RXD   →  Arduino D6      (SoftwareSerial TX)
 //
 // ┌──────────────────────────────────────────────────────────┐
-// │  伺服馬達接線 (SG90 / MG90S 之類的 3 線伺服)              │
+// │  繼電器模組接線 (Relay Module)                              │
 // └──────────────────────────────────────────────────────────┘
-//   伺服 紅線 (VCC)   →  Arduino 5V        (小型 SG90 可以)
-//                       ⚠️ 大顆伺服請用外部 5V 電源, GND 共接
-//   伺服 棕/黑 (GND)  →  Arduino GND
-//   伺服 橘/黃 (訊號) →  Arduino D9        (PWM)
-//
-// ┌──────────────────────────────────────────────────────────┐
-// │  控制指令 (from Python recognize_camera.py)              │
-// └──────────────────────────────────────────────────────────┘
-//   "OPEN\n"  → 伺服轉到開門角度, UNLOCK_DURATION 毫秒後自動關門
-//   "DENY\n"  → 立即關門 (回到關門角度)
+//   VCC → Arduino 5V
+//   GND → Arduino GND
+//   IN  → Arduino D9
+//   COM → 門鎖控制線 A
+//   NO  → 門鎖控制線 B
 // ============================================================
 
 #include <SoftwareSerial.h>
-#include <Servo.h>
 
 // ---------- Pin definitions ----------------------------------
-const int BT_RX_PIN    = 5;   // Arduino D5 ← BT module TXD
-const int BT_TX_PIN    = 6;   // Arduino D6 → BT module RXD (需分壓!)
-const int BT_STATE_PIN = 7;   // BT STATE (optional)
-const int SERVO_PIN    = 9;   // 伺服馬達訊號腳 (PWM)
+const int BT_RX_PIN    = 5;   
+const int BT_TX_PIN    = 6;   
+const int RELAY_PIN    = 9;   // 控制繼電器的腳位
 
 // ---------- Parameters ---------------------------------------
-const unsigned long UNLOCK_DURATION = 3000;  // ms, 自動關門時間
-const int SERVO_CLOSED_ANGLE = 0;            // 關門角度
-const int SERVO_OPEN_ANGLE   = 90;           // 開門角度
+const unsigned long TRIGGER_DURATION = 1000;  // ms, 模擬按下按鈕的「短路時間」
+                                              // 很多自帶控制板的鎖只需要短路 0.5~1 秒就會自動開門並重新上鎖
+
+// 💡 繼電器觸發邏輯設定
+// 市面上的繼電器模組多為「低電平觸發」(LOW 導通)。
+// 如果你的模組是「高電平觸發」(HIGH 導通)，請將下面兩個變數互換：
+const int RELAY_ON  = HIGH;    // 觸發繼電器 (COM 與 NO 短路)
+const int RELAY_OFF = LOW;   // 關閉繼電器 (COM 與 NO 斷開)
 
 // ---------- Objects ------------------------------------------
 SoftwareSerial btSerial(BT_RX_PIN, BT_TX_PIN);
-Servo doorServo;
 
 // ---------- State --------------------------------------------
-bool doorOpen = false;
-unsigned long openedAt = 0;
+bool doorTriggered = false;
+unsigned long triggeredAt = 0;
 
 // ============================================================
 void setup() {
-  Serial.begin(9600);      // USB debug
-  btSerial.begin(38400);   // HC-06 常見出廠值; 若仍亂碼改試 9600 / 115200
+  Serial.begin(9600);      
+  btSerial.begin(38400);   
 
-  pinMode(BT_STATE_PIN, INPUT);
+  // ⚠️ 關鍵：初始化繼電器腳位時，先寫入 OFF 狀態，再設為 OUTPUT
+  // 這樣可以避免 Arduino 剛開機瞬間腳位電壓不穩，導致門鎖被意外觸發
+  digitalWrite(RELAY_PIN, RELAY_OFF);
+  pinMode(RELAY_PIN, OUTPUT);
 
-  doorServo.attach(SERVO_PIN);
-  doorServo.write(SERVO_CLOSED_ANGLE);  // 上電就先確保關門
-
-  Serial.println("[BOOT] Face Door (Servo) ready.");
+  Serial.println("[BOOT] Face Door (Relay/Dry Contact) ready.");
   Serial.println("[INFO] Waiting for Bluetooth commands…");
 }
 
@@ -71,27 +63,27 @@ void loop() {
   // ---- 讀取藍牙指令 ----------------------------------------
   if (btSerial.available()) {
     String cmd = btSerial.readStringUntil('\n');
-    cmd.trim();  // 去掉 \r
+    cmd.trim();  // 去除換行符號
 
     Serial.print("[BT RX] \"");
     Serial.print(cmd);
     Serial.println("\"");
 
     if (cmd == "OPEN") {
-      openDoor();
+      triggerDoor();
     } else if (cmd == "DENY") {
-      closeDoor();
-      Serial.println("[DOOR] Access DENIED — keeping closed.");
+      Serial.println("[DOOR] Access DENIED — ignoring.");
     } else {
       Serial.print("[WARN] Unknown command: ");
       Serial.println(cmd);
     }
   }
 
-  // ---- UNLOCK_DURATION 後自動關門 --------------------------
-  if (doorOpen && (millis() - openedAt >= UNLOCK_DURATION)) {
-    closeDoor();
-    Serial.println("[DOOR] Auto-close after timeout.");
+  // ---- TRIGGER_DURATION 後停止短路 --------------------------
+  if (doorTriggered && (millis() - triggeredAt >= TRIGGER_DURATION)) {
+    digitalWrite(RELAY_PIN, RELAY_OFF);  // 放開短路
+    doorTriggered = false;
+    Serial.println("[DOOR] Trigger finished (Relay OFF).");
   }
 }
 
@@ -99,22 +91,16 @@ void loop() {
 // Helpers
 // ============================================================
 
-void openDoor() {
-  if (!doorOpen) {
-    doorServo.write(SERVO_OPEN_ANGLE);
-    doorOpen = true;
-    openedAt = millis();
-    Serial.println("[DOOR] OPENED.");
+void triggerDoor() {
+  if (!doorTriggered) {
+    digitalWrite(RELAY_PIN, RELAY_ON);  // 讓 COM 與 NO 短路
+    doorTriggered = true;
+    triggeredAt = millis();
+    Serial.println("[DOOR] TRIGGERED (Relay ON) -> Wires shorted.");
     btSerial.println("ACK:OPEN");
   } else {
-    // 已經開了, 重設關門計時
-    openedAt = millis();
-    Serial.println("[DOOR] Already open — timer reset.");
+    // 已經在短路中，延長時間
+    triggeredAt = millis();
+    Serial.println("[DOOR] Already triggered — timer reset.");
   }
-}
-
-void closeDoor() {
-  doorServo.write(SERVO_CLOSED_ANGLE);
-  doorOpen = false;
-  Serial.println("[DOOR] CLOSED.");
 }
